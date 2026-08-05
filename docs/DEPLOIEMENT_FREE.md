@@ -1,176 +1,108 @@
-# Déploiement gratuit — alwaysdata (sans carte bancaire) + Vercel
+# Déploiement gratuit — InfinityFree (sans carte bancaire) + Vercel
 
-Guide pas-à-pas pour mettre AchatMarketCI en ligne **gratuitement et sans carte bancaire** :
-- **API Laravel** → **alwaysdata** (plan *Free* : 0 € à vie, sans carte, HTTPS inclus, PHP 8, MySQL/Postgres, SSH)
-- **Frontend Next.js** → **Vercel** (domaine `achatmarketci.vercel.app`)
-- **E-mails OTP** → **Brevo SMTP** (déjà configuré : `MAIL_USERNAME=b47b0b001@smtp-brevo.com`, expéditeur `bohuegnonzansara@gmail.com` vérifié)
-
-> Pourquoi pas Oracle/Render ? Oracle demande une carte (refusée pour vous), Render n'est pas souhaité.
-> alwaysdata ne demande **aucune carte** à l'inscription (vérifié sur le site officiel).
-
-Dépôt : https://github.com/Bohue2022/achatmarketci
+Déploiement sans SSH. Pour Tester/n°2, le socle du projet : **InfinityFree (PHP 8.3, MySQL)**.
+Pendant le déploiement on utilise PHP **local** pour générer le bundle.
 
 ---
 
-## Ce qu'on obtient
+## Contexte — ce qui fait bloquer sans SSH
 
-| Élément | Valeur |
+| Problème | Solution appliquée |
 | --- | --- |
-| URL de l'API | `https://achatmarketci.alwaysdata.net` |
-| URL du site | `https://achatmarketci.vercel.app` |
-| Base de données | MySQL (offerte) |
-| HTTPS | Inclus sur l'API (nécessaire, sinon le navigateur bloque les appels depuis Vercel) |
+| `php artisan` indisponible (console) | On prépare tout côté **local** |
+| Ici, les migrations `php artisan migrate` ne « marchent pas » | On les **recrée** une fois |
 
 ---
 
-## Partie 1 — Créer le compte alwaysdata
+## Étape 1 — Compte InfinityFree
 
-1. Aller sur https://www.alwaysdata.com → **Sign up / Inscription**
-   - E-mail + mot de passe, **aucune carte bancaire**.
-2. Confirmer l'e-mail de validation reçu.
-3. Vous arrivez sur l'**Admin** (panel alwaysdata).
-
----
-
-## Partie 2 — Créer la base de données
-
-Dans l'admin alwaysdata :
-1. **SQL → MySQL** → **Create a database** :
-   - Nom : `achatmarketci`
-   - *Serveur : laisser le serveur par défaut (`mysql-...`)*
-   - **Create**.
-2. Notez : **nom du serveur MySQL**, **nom de la base**, **utilisateur** et **mot de passe**
-   (utilisateur = votre compte alwaysdata, mot de passe = celui du compte admin).
-   Ces 4 valeurs iront dans le `.env` du backend.
+1. https://www.infinityfree.com → **Register** (e-mail + mdp, **aucune carte**).
+2. Créer un site → sous-domaine `achatmarketci` → **`achatmarketfree.je`**.
+3. Noter dans le panneau :
+   - **FTP** : `ftpupload.net` / user / mdp
+   - **MySQL** : `sqlXXX.infinityfree.com` / database / user / mdp
 
 ---
 
-## Partie 3 — Héberger le backend (Laravel)
+## Étape 2 — Préparer le bundle (déjà fait ici)
 
-### a) Activer SSH + ouvrir un terminal
+Le bundle est prêt sur le Bureau : `C:\Users\kamag\Desktop\deploy-infinityfree\`
+- `1_app.zip` : code Laravel **sans vendor** (menu, config, .env, install.php, etc.)
+- `2_vendor.zip` : dossier `vendor/` (Composer n'est pas dispo sur le serveur)
 
-1. Dans l'admin : **SSH → Features** → activer.
-2. Sur votre machine, se connecter (remplacer `alice` par votre identifiant alwaysdata) :
-   ```powershell
-   ssh alice@ssh-alice.alwaysdata.net
-   ```
-   (le mot de passe = celui de votre compte alwaysdata).
+> Le bundle contient les fichiers **secrets** (`.env` + clés) → à garder uniquement pour déployer.
+> Repassez-les dans Git **seuls** si besoin de refaire ce bundle.
 
-### b) Installer le code
+---
 
-Sur le serveur (SSH) :
-```bash
-cd ~/www
-git clone https://github.com/Bohue2022/achatmarketci.git
-cd achatmarketci/backend
-# Dépendances (sans les outils de dev)
-composer install --no-dev --optimize-autoloader
+## Étape 3 — Upload du bundle sur InfinityFree
 
-# Fichier de configuration de prod
-cp .env.production.example .env
-nano .env   # ⬇ adapter (voir ci-dessous)
+1. Dans le panneau InfinityFree : **Open File Manager** → ouvrir `htdocs/`.
+2. Vider `htdocs/` (supprimer les fichiers par défaut de démonstration).
+3. **Upload** `1_app.zip` (depuis le Bureau) → clic droit → **Extract** (dans le dossier courant).
+4. **Upload** `2_vendor.zip` → **Extract** (dans le même dossier).
+   - Résultat attendu dans `htdocs/` : `app/`, `bootstrap/`, `config/`, `database/`, `public/`, `routes/`, `storage/`, `vendor/`, `.env`, `.htaccess`, `install.php`, `artisan`, `composer.json`, …
 
-# Clé de chiffrement
-php artisan key:generate
-```
+> ⚠️ Si l'extraction crée un sous-dossier supplémentaire (ex. `htdocs/1/x/`), re-déplacer les éléments
+> à la racine de `htdocs/`. Le contenu du zip doit DEVENIR `htdocs/`.
 
-### c) Contenu du `.env`
+---
 
+## Étape 4 — Lancer l'installation de la base
+
+1. Ouvrir : `https://achatmarketci.free/ext/install.php?key=ACHATMARKET_SETUP`
+   → doit afficher **`MIGRATION_OK`** (+ la liste des migrations).
+   - Si erreur affichée, fermer/fermer au besoin, `APP_DEBUG=true` aide au diagnostic.
+2. **Supprimer `install.php`** dans le File Manager** (obligatoire, c'est une porte).
+3. Vérifier l'API : `https://achatmarketci.free.je/api/health` → `{"status":"ok"}`.
+
+---
+
+## Étape 5 — Sécuriser / finaliser le backend
+
+Une fois en ligne :
 ```env
-APP_NAME=AchatMarketCI
-APP_ENV=production
 APP_DEBUG=false
-APP_URL=https://achatmarketci.alwaysdata.net
-
-# Base de données (valeurs de la Partie 2)
-DB_CONNECTION=mysql
-DB_HOST=mysql-XXXXX.alwaysdata.net    # serveur MySQL alwaysdata
-DB_PORT=3306
-DB_DATABASE=achatmarketci
-DB_USERNAME=<votre-identifiant-alwaysdata>
-DB_PASSWORD=<mot-de-passe-du-compte-alwaysdata>
-
-# E-mail (Brevo) — MAIL_* déjà pré-remplis dans .env.production.example
-# ⚠️ MAIL_PASSWORD = la vraie clé SMTP xsmtpsib-...
-MAIL_FROM_ADDRESS=bohuegnonzansara@gmail.com
-
-# CORS : autoriser le frontend Vercel
-CORS_ALLOWED_ORIGINS=https://achatmarketci.vercel.app
-
-SESSION_SECURE_COOKIE=true
 ```
+Puis re-uploader `.env` modifié (File Manager → remplacer).
 
-### d) Migrations + données de base
-
-```bash
-php artisan migrate --seed          # villes, marques, plans
-php artisan storage:link            # stockage des photos
-# Supprimer les comptes de démo avant mise en service réelle :
-php artisan tinker --execute="App\Models\User::whereIn('email',['admin@rr.ci','modo@rr.ci','pro@rr.ci','particulier@rr.ci'])->delete(); echo 'ok';"
-# Cache de production :
-php artisan config:cache && php artisan route:cache && php artisan view:cache
+Supprimer les comptes de démo (post-setup) via une base mysql (phpMyAdmin du panneau) :
 ```
-
-### e) Exposer la bonne racine du site
-
-1. Dans l'admin alwaysdata : **Web → Sites** → modifier le site créé par défaut
-   (ou en créer un).
-2. **Directory (racine du site)** : pointer vers `www/achatmarketci/backend/public`
-   (c'est ce que fait l'installateur Laravel d'alwaysdata automatiquement).
-3. **URL** : `achatmarketci.alwaysdata.net` (sous-domaine gratuit) → **Save**.
-4. HTTPS : dans **Web → Sites → votre site → SSL/TLS**, activer le certificat gratuit.
-
-### f) Vérifier l'API
-
-Ouvrir `https://achatmarketci.alwaysdata.net/api/health` → doit répondre `{"status":"ok"}`.
+DELETE FROM users WHERE email IN ('admin@rr.ji','modo@rr.ji','pro@rr.ji','particulier@rr.ji');
+```
 
 ---
 
-## Partie 4 — Déployer le frontend sur Vercel
+## Étape 6 — Déployer le frontend (Vercel)
 
-1. **Compte Vercel** : https://vercel.com → **Sign up** → continuer **avec GitHub** (compte `Bohue2022`). *(Aucune carte : Vercel est gratuit pour ce projet.)*
-2. **Add New… → Project** → importer le dépôt `achatmarketci`.
-3. Configuration :
+1. https://vercel.com → **Sign up** → avec **GitHub** (`Bohue2022`).
+2. **Add New → Project** → importer `achatmarketci`.
+3. Réglages :
    - Framework : **Next.js**
    - **Root Directory : `frontend`**
-   - **Environment Variables** :
-     | Nom | Valeur |
-     | --- | --- |
-     | `NEXT_PUBLIC_API_URL` | `https://achatmarketci.alwaysdata.net/api` |
+   - Variables d'env : `NEXT_PUBLIC_API_URL=https://achatmarketci.free.je/api`
    - **Deploy**.
-4. Site en ligne : `https://achatmarketci.vercel.app`
-   (si ce nom est pris, Vercel en proposera un autre → mettre à jour `CORS_ALLOWED_ORIGINS` dans le `.env` puis `php artisan config:cache`).
+4. Site : `https://achatmarketci.vercel.app`.
 
 ---
 
-## Partie 5 — Vérification finale
+## Vérifications finales
 
 | # | Test |
 | --- | --- |
-| 1 | Ouvrir `https://achatmarketci.vercel.app` |
-| 2 | Créer un compte → recevoir le code OTP (Brevo) → vérifier |
-| 3 | Se connecter / déconnecter |
+| 1 | `https://achatmarketci.vercel.app` s'ouvre |
+| 2 | Créer un compte → code OTP reçu (Brevo) → vérifier |
+| 3 | Connexion / déconnexion |
 | 4 | Déposer une annonce + photos |
-| 5 | `https://achatmarketci.alwaysdata.net/api/health` répond |
+| 5 | `https://achatmarketci.free.je/api/health` |
 
 ---
 
-## Mises à jour du code
+## Limites connues d'InfinityFree
 
-```bash
-cd ~/www/achatmarketci
-git pull origin master
-cd backend
-composer install --no-dev --optimize-autoloader
-php artisan migrate --force
-php artisan config:cache && php artisan route:cache && php artisan view:cache
-```
-
----
-
-## Limites de l'offre gratuite alwaysdata (à connaître)
-
-- 1 Go de disque, 256 Mo de RAM, 0,25 CPU : **suffisant pour démarrer**, pas pour la grosse charge.
-- Usage **personnel** uniquement (passage payant à ~5 €/mois si le site grossit).
-- Si jamais le SMTP Brevo (port 587) est bloqué par alwaysdata, passer sur le **port 2525** de Brevo (`MAIL_PORT=2525`) — à tester.
-- Les photos sont stockées sur le disque local (1 Go) : pour beaucoup de photos, prévoir S3/Cloudinary plus tard.
+- **Pas de SSH** ni queue workers ni scheduler → envoi d'OTP **synchrone** (déjà le cas).
+- **`open_basedir`** : tout doit rester dans `htdocs/` (respecté).
+- MySQL accessible **uniquement** depuis le réseau Infinity → migrations via `install.php` (pas en local).
+- **SMTP sortant (Brevo port 587)** : à tester ; si bloqué, passer sur le **port 2525** de Brevo.
+- Photos : `storage:link` non dispo → les uploads ne sont pas servis publiquement via `/storage` ; à traiter plus tard (S3/CDN ou controller adapté).
+- Hobby hosting : prévoir un VPS payant (~5 €/mois) quand le trafic grossit.
