@@ -1,203 +1,176 @@
-# Déploiement gratuit — Oracle Cloud Free VPS + Vercel
+# Déploiement gratuit — alwaysdata (sans carte bancaire) + Vercel
 
-Guide pas-à-pas pour mettre AchatMarketCI en ligne **gratuitement** :
-- **API Laravel** → Oracle Cloud **Free Tier** (VPS ARM always-free : 4 vCPU, 24 Go RAM, 200 Go disque)
+Guide pas-à-pas pour mettre AchatMarketCI en ligne **gratuitement et sans carte bancaire** :
+- **API Laravel** → **alwaysdata** (plan *Free* : 0 € à vie, sans carte, HTTPS inclus, PHP 8, MySQL/Postgres, SSH)
 - **Frontend Next.js** → **Vercel** (domaine `achatmarketci.vercel.app`)
 - **E-mails OTP** → **Brevo SMTP** (déjà configuré : `MAIL_USERNAME=b47b0b001@smtp-brevo.com`, expéditeur `bohuegnonzansara@gmail.com` vérifié)
-- **HTTPS pour l'API sans payer de domaine** → **DuckDNS** (sous-domaine gratuit) + **Certbot**
+
+> Pourquoi pas Oracle/Render ? Oracle demande une carte (refusée pour vous), Render n'est pas souhaité.
+> alwaysdata ne demande **aucune carte** à l'inscription (vérifié sur le site officiel).
 
 Dépôt : https://github.com/Bohue2022/achatmarketci
 
 ---
 
-## Pourquoi un sous-domaine DuckDNS ?
+## Ce qu'on obtient
 
-Vercel sert le frontend **uniquement en HTTPS**. Le navigateur **bloque** les requêtes du frontend
-(https) vers une API en http (contenu mixte). Il faut donc l'API en HTTPS → il faut un nom de domaine.
-DuckDNS offre un sous-domaine gratuit (ex. `api-achatmarketci.duckdns.org`) pointant vers l'IP du VPS,
-sur lequel Certbot installe un certificat Let's Encrypt.
-
-> Si vous avez (ou achetez) un vrai domaine `achatmarketci.ci`, la partie DuckDNS se remplace par :
-> créer un enregistrement A `api` → IP du VPS, puis certbot sur `api.achatmarketci.ci`.
+| Élément | Valeur |
+| --- | --- |
+| URL de l'API | `https://achatmarketci.alwaysdata.net` |
+| URL du site | `https://achatmarketci.vercel.app` |
+| Base de données | MySQL (offerte) |
+| HTTPS | Inclus sur l'API (nécessaire, sinon le navigateur bloque les appels depuis Vercel) |
 
 ---
 
-## Partie 1 — Créer le VPS Oracle Cloud
+## Partie 1 — Créer le compte alwaysdata
 
-1. **Compte** : https://signup.oraclecloud.com — e-mail + carte bancaire (sert à vérifier
-   l'identité, **jamais débitée** sur le Free Tier). Choisir la zone « toujours gratuit ».
-2. **Créer l'instance** : menu ☰ → **Compute → Instances → Create instance** :
-   - Nom : `achatmarketci-api`
-   - Image : **Ubuntu 24.04** (PHP 8.3 inclus dans les dépôts)
-   - Shape : **Ampere A1 (ARM)** — 4 OCPU / 24 Go RAM (toujours gratuit)
-   - Clés SSH : **Generate a key pair** → télécharger le `.pem` (ex. `achatmarketci.pem`)
-   - **Create** puis attendre l'état *Running*. Noter l'**IP publique**.
-3. **Ouvrir les ports** : ☰ → **Networking → Virtual Cloud Networks** → le réseau → la
-   subnet `public` → **Security Lists** → la liste par défaut → **Add Ingress Rules** :
-   - TCP `80` de `0.0.0.0/0` (HTTP)
-   - TCP `443` de `0.0.0.0/0` (HTTPS)
-4. **Tester la connexion** (depuis PowerShell, dans le dossier où est le `.pem`) :
+1. Aller sur https://www.alwaysdata.com → **Sign up / Inscription**
+   - E-mail + mot de passe, **aucune carte bancaire**.
+2. Confirmer l'e-mail de validation reçu.
+3. Vous arrivez sur l'**Admin** (panel alwaysdata).
+
+---
+
+## Partie 2 — Créer la base de données
+
+Dans l'admin alwaysdata :
+1. **SQL → MySQL** → **Create a database** :
+   - Nom : `achatmarketci`
+   - *Serveur : laisser le serveur par défaut (`mysql-...`)*
+   - **Create**.
+2. Notez : **nom du serveur MySQL**, **nom de la base**, **utilisateur** et **mot de passe**
+   (utilisateur = votre compte alwaysdata, mot de passe = celui du compte admin).
+   Ces 4 valeurs iront dans le `.env` du backend.
+
+---
+
+## Partie 3 — Héberger le backend (Laravel)
+
+### a) Activer SSH + ouvrir un terminal
+
+1. Dans l'admin : **SSH → Features** → activer.
+2. Sur votre machine, se connecter (remplacer `alice` par votre identifiant alwaysdata) :
    ```powershell
-   ssh -i .\achatmarketci.pem ubuntu@<IP_PUBLIQUE>
+   ssh alice@ssh-alice.alwaysdata.net
    ```
+   (le mot de passe = celui de votre compte alwaysdata).
 
----
+### b) Installer le code
 
-## Partie 2 — Sous-domaine gratuit (DuckDNS)
-
-1. Créer un compte sur https://duckdns.org (se connecter avec GitHub/Google ou un e-mail).
-2. Cliquer **Add Domain** → nom `api-achatmarketci` (→ `api-achatmarketci.duckdns.org`).
-3. Dans le tableau : **Current IP** = l'IP publique du VPS → **Update IP**.
-4. (Optionnel) installer le script auto-update DuckDNS sur le VPS pour garder l'IP à jour.
-
----
-
-## Partie 3 — Installer et configurer le backend sur le VPS
-
-Connecté en SSH sur le VPS, exécuter :
-
+Sur le serveur (SSH) :
 ```bash
-# 1) Paquets
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y nginx mysql-server certbot python3-certbot-nginx \
-  php-fpm php-mysql php-mbstring php-xml php-curl php-zip php-gd php-bcmath \
-  composer git unzip
-
-# 2) PHP
-php -v   # doit afficher 8.3+
-
-# 3) Récupérer le code
-sudo git clone https://github.com/Bohue2022/achatmarketci.git /var/www/achatmarketci
-sudo chown -R $USER:$USER /var/www/achatmarketci
-
-# 4) Dépendances + config
-cd /var/www/achatmarketci/backend
+cd ~/www
+git clone https://github.com/Bohue2022/achatmarketci.git
+cd achatmarketci/backend
+# Dépendances (sans les outils de dev)
 composer install --no-dev --optimize-autoloader
+
+# Fichier de configuration de prod
 cp .env.production.example .env
-nano .env   # ⬇ voir le bloc « Valeurs à mettre dans .env » ci-dessous
+nano .env   # ⬇ adapter (voir ci-dessous)
+
+# Clé de chiffrement
 php artisan key:generate
-
-# 5) Base de données MySQL
-sudo mysql <<'SQL'
-CREATE DATABASE achatmarketci CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'achatmarketci'@'localhost' IDENTIFIED BY 'UN_MOT_DE_PASSE_FORT';
-GRANT ALL PRIVILEGES ON achatmarketci.* TO 'achatmarketci'@'localhost';
-FLUSH PRIVILEGES;
-SQL
-
-# 6) Schéma + données de base (villes, marques, plans)
-php artisan migrate --seed
-
-# 7) Stockage des photos
-php artisan storage:link
-sudo chmod -R 775 storage bootstrap/cache
-
-# 8) Supprimer les comptes de démo AVANT la mise en service
-php artisan tinker --execute="App\Models\User::whereIn('email',['admin@rr.ci','modo@rr.ci','pro@rr.ci','particulier@rr.ci'])->delete(); echo 'demo comptes supprimés';"
-
-# 9) Cache de production
-php artisan config:cache && php artisan route:cache && php artisan view:cache
-
-# 10) Permissions fpm
-sudo chown -R www-data:www-data storage bootstrap/cache
 ```
 
-### Valeurs à mettre dans `.env`
+### c) Contenu du `.env`
+
 ```env
+APP_NAME=AchatMarketCI
 APP_ENV=production
 APP_DEBUG=false
-APP_URL=https://api-achatmarketci.duckdns.org
+APP_URL=https://achatmarketci.alwaysdata.net
+
+# Base de données (valeurs de la Partie 2)
 DB_CONNECTION=mysql
+DB_HOST=mysql-XXXXX.alwaysdata.net    # serveur MySQL alwaysdata
+DB_PORT=3306
 DB_DATABASE=achatmarketci
-DB_USERNAME=achatmarketci
-DB_PASSWORD=UN_MOT_DE_PASSE_FORT
+DB_USERNAME=<votre-identifiant-alwaysdata>
+DB_PASSWORD=<mot-de-passe-du-compte-alwaysdata>
+
+# E-mail (Brevo) — MAIL_* déjà pré-remplis dans .env.production.example
+# ⚠️ MAIL_PASSWORD = la vraie clé SMTP xsmtpsib-...
+MAIL_FROM_ADDRESS=bohuegnonzansara@gmail.com
+
+# CORS : autoriser le frontend Vercel
 CORS_ALLOWED_ORIGINS=https://achatmarketci.vercel.app
+
 SESSION_SECURE_COOKIE=true
-# MAIL_* : déjà pré-remplis dans .env.production.example (Brevo)
-#          ⚠️ mettre la vraie clé SMTP dans MAIL_PASSWORD
 ```
 
----
-
-## Partie 4 — Nginx + HTTPS (Let's Encrypt)
-
-Créer `/etc/nginx/sites-available/achatmarketci` :
-
-```nginx
-server {
-    listen 80;
-    server_name api-achatmarketci.duckdns.org;
-
-    root /var/www/achatmarketci/backend/public;
-    index index.php;
-
-    location / {
-        try_files $uri $uri/ /index.php?$query_string;
-    }
-
-    location ~ \.php$ {
-        include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
-    }
-
-    location ~ /\.(?!well-known).* { deny all; }
-}
-```
-
-Activer + obtenir le certificat :
+### d) Migrations + données de base
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/achatmarketci /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl reload nginx
-sudo certbot --nginx -d api-achatmarketci.duckdns.org   # suivez les instructions
-# Renouvellement automatique :
-echo "0 3 * * * root certbot renew --quiet --deploy-hook 'systemctl reload nginx'" | sudo tee /etc/cron.d/certbot-renew
+php artisan migrate --seed          # villes, marques, plans
+php artisan storage:link            # stockage des photos
+# Supprimer les comptes de démo avant mise en service réelle :
+php artisan tinker --execute="App\Models\User::whereIn('email',['admin@rr.ci','modo@rr.ci','pro@rr.ci','particulier@rr.ci'])->delete(); echo 'ok';"
+# Cache de production :
+php artisan config:cache && php artisan route:cache && php artisan view:cache
 ```
 
-Vérifier : ouvrir `https://api-achatmarketci.duckdns.org/api/health` → doit répondre `{"status":"ok"}`.
+### e) Exposer la bonne racine du site
+
+1. Dans l'admin alwaysdata : **Web → Sites** → modifier le site créé par défaut
+   (ou en créer un).
+2. **Directory (racine du site)** : pointer vers `www/achatmarketci/backend/public`
+   (c'est ce que fait l'installateur Laravel d'alwaysdata automatiquement).
+3. **URL** : `achatmarketci.alwaysdata.net` (sous-domaine gratuit) → **Save**.
+4. HTTPS : dans **Web → Sites → votre site → SSL/TLS**, activer le certificat gratuit.
+
+### f) Vérifier l'API
+
+Ouvrir `https://achatmarketci.alwaysdata.net/api/health` → doit répondre `{"status":"ok"}`.
 
 ---
 
-## Partie 5 — Déployer le frontend sur Vercel
+## Partie 4 — Déployer le frontend sur Vercel
 
-1. **Compte Vercel** : https://vercel.com → **Sign up** → continuer **avec GitHub**
-   (compte `Bohue2022`).
-2. **Import** : **Add New… → Project** → choisir le dépôt `achatmarketci`.
-3. **Configuration du projet** :
+1. **Compte Vercel** : https://vercel.com → **Sign up** → continuer **avec GitHub** (compte `Bohue2022`). *(Aucune carte : Vercel est gratuit pour ce projet.)*
+2. **Add New… → Project** → importer le dépôt `achatmarketci`.
+3. Configuration :
    - Framework : **Next.js**
    - **Root Directory : `frontend`**
    - **Environment Variables** :
      | Nom | Valeur |
      | --- | --- |
-     | `NEXT_PUBLIC_API_URL` | `https://api-achatmarketci.duckdns.org/api` |
+     | `NEXT_PUBLIC_API_URL` | `https://achatmarketci.alwaysdata.net/api` |
    - **Deploy**.
-4. Résultat : `https://achatmarketci.vercel.app` (modifiable dans **Project → Settings → Domains**).
-5. Si le nom `achatmarketci` est pris, Vercel proposera `achatmarketci-<suffixe>.vercel.app` →
-   **mettre à jour `CORS_ALLOWED_ORIGINS`** dans le `.env` du VPS puis `php artisan config:cache`.
+4. Site en ligne : `https://achatmarketci.vercel.app`
+   (si ce nom est pris, Vercel en proposera un autre → mettre à jour `CORS_ALLOWED_ORIGINS` dans le `.env` puis `php artisan config:cache`).
 
 ---
 
-## Partie 6 — Vérification finale
+## Partie 5 — Vérification finale
 
 | # | Test |
 | --- | --- |
 | 1 | Ouvrir `https://achatmarketci.vercel.app` |
 | 2 | Créer un compte → recevoir le code OTP (Brevo) → vérifier |
 | 3 | Se connecter / déconnecter |
-| 4 | Déposer une annonce + photos (stockées sur le VPS) |
-| 5 | `https://api-achatmarketci.duckdns.org/api/health` répond |
+| 4 | Déposer une annonce + photos |
+| 5 | `https://achatmarketci.alwaysdata.net/api/health` répond |
 
 ---
 
-## Mises à jour du code (après un changement)
+## Mises à jour du code
 
 ```bash
-cd /var/www/achatmarketci
+cd ~/www/achatmarketci
 git pull origin master
 cd backend
-composer install --no-dev --optimize-autoloader   # si nouvelles dépendances
-php artisan migrate --force                       # si nouvelles migrations
+composer install --no-dev --optimize-autoloader
+php artisan migrate --force
 php artisan config:cache && php artisan route:cache && php artisan view:cache
-sudo systemctl reload php8.3-fpm
 ```
+
+---
+
+## Limites de l'offre gratuite alwaysdata (à connaître)
+
+- 1 Go de disque, 256 Mo de RAM, 0,25 CPU : **suffisant pour démarrer**, pas pour la grosse charge.
+- Usage **personnel** uniquement (passage payant à ~5 €/mois si le site grossit).
+- Si jamais le SMTP Brevo (port 587) est bloqué par alwaysdata, passer sur le **port 2525** de Brevo (`MAIL_PORT=2525`) — à tester.
+- Les photos sont stockées sur le disque local (1 Go) : pour beaucoup de photos, prévoir S3/Cloudinary plus tard.
