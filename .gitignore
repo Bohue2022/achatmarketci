@@ -1,0 +1,15 @@
+# Environnement / secrets — jamais versionnés
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# Système
+.DS_Store
+Thumbs.db
+
+# Dossiers de build locaux
+/node_modules
+/.next
+/out
+/vendor
